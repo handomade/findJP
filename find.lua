@@ -172,8 +172,8 @@ local function search(searchString, useDescription)
     end
     
     for k,v in ipairs(storageSlips) do
-        local slip = resources:GetItemById(v[1].ItemID);
-        local slipItems = slips.items[v[1].ItemID];
+        local slip = resources:GetItemById(v[1].ItemId);
+        local slipItems = slips.items[v[1].ItemId];
         local extra = v[2].Extra;
         
         for i,slipItemID in ipairs(slipItems) do
