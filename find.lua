@@ -24,7 +24,7 @@
 
 _addon.author   = 'MalRD';
 _addon.name     = 'Find';
-_addon.version  = '3.0.0';
+_addon.version  = '3.0.1';
 
 local slips = require('slips');
 
@@ -91,7 +91,7 @@ local function find(item, cleanString, useDescription)
         return true;
     elseif (item.LogNamePlural[config.language] ~= nil and string.lower(item.LogNamePlural[config.language]):find(cleanString)) then
         return true;
-    elseif (useDescription and item.Description ~= nil) then
+    elseif (useDescription and item.Description ~= nil and item.Description[config.language] ~= nil) then
         return (string.lower(item.Description[config.language]):find(cleanString));
     end
     
