@@ -22,9 +22,9 @@
  *  DEALINGS IN THE SOFTWARE.
 ]]--
 
-_addon.author   = 'MalRD';
+_addon.author   = 'MalRD, zombie343';
 _addon.name     = 'Find';
-_addon.version  = '3.0.1';
+_addon.version  = '3.1.0';
 
 local slips = require('slips');
 
@@ -49,6 +49,10 @@ local default_config =
     language    =   0
 };
 local config = default_config;
+local inventory = AshitaCore:GetDataManager():GetInventory();
+local resources = AshitaCore:GetResourceManager();
+local MINSLIP = 1;
+local MAXSLIP = #slips.ids;
 
 -------------------------------------------------------------------------------
 --Returns the real ID and name for the given inventory storage index.        --
@@ -205,32 +209,226 @@ function hasBit(x, p)
     return x % (p + p) >= p;
 end
 
+local function findinslip(searchslip, item)
+    if (item == nil) then 
+        return nil,nil
+    end;
+    
+    if searchslip == 0 then
+        for k,v in pairs(slips.items) do
+            local slip = resources:GetItemById(k);
+            for x = 1, #v do
+                if item.Id == v[x] then
+                    local slipItem = resources:GetItemById(item.Id);
+                    --printf('%s: %s', slip.Name[config.language], slipItem.Name[config.language]);
+                    return slip.Name[config.language], slipItem.Name[config.language];
+                end
+            end
+        end
+    elseif searchslip >= MINSLIP and searchslip <= MAXSLIP then
+        local slip = resources:GetItemById(slips.ids[searchslip]);
+        for x = 1, #slips.items[slips.ids[searchslip]] do
+            if item.Id == slips.items[slips.ids[searchslip]][x] then
+                local slipItem = resources:GetItemById(item.Id);
+                --printf('%s: %s', slip.Name[config.language], slipItem.Name[config.language]);
+                return slip.Name[config.language], slipItem.Name[config.language];
+            end
+        end    
+    else
+        printf('\30\08Please enter a valid storage slip between %i and %i, inclusive.', MINSLIP, MAXSLIP);
+    end
+    return nil,nil;
+end
+
+
 -------------------------------------------------------------------------------
 local function getFindArgs(cmd)
     if (not cmd:find('/find', 1, true)) then return nil; end
     
     local indexOf = cmd:find(' ', 1, true);
-    if (indexOf == nil) then return nil; end
-    
-    return
-    { 
+    if (cmd:find('/findslips', 1, true) or cmd:find('/finddupes', 1, true)) and indexOf == nil then  
+        cmdTable =     { 
+            [1] = cmd
+        };
+        return cmdTable;
+    end
+
+    --Specific /findxyz command inputs that require second argument but don't have one specified
+    if indexOf == nil then
+        return nil;
+    end
+
+    --All other inputs that have /find and a space " ", return both words:
+    cmdTable =     { 
         [1] = cmd:sub(1,indexOf-1),  
-        [2] = cmd:sub(indexOf+1)
+        [2] = cmd:sub(indexOf+1),
     };
+
+    return cmdTable;
+end
+
+-------------------------------------------------------------------------------
+-- func: printslips
+-- desc: Searches the player's inventory for any items that can be stored in 
+--       storage slips.
+--
+-- args: searchslip     -> Indicates search all slips (0) OR specifies slip to 
+--                         search for (1-27 index into slip_data:slip.items[])
+-------------------------------------------------------------------------------
+local function printslips(searchslip) 
+    
+    local found = { };
+    local foundSlip, foundItem;
+    local result = { };
+    local keyset = {};
+
+    if searchslip == 0 then
+        printf('\30\08Searching for any items that can be stored on any storage slips...');          
+    elseif searchslip >= MINSLIP and searchslip <= MAXSLIP then
+        printf('\30\08Searching for any items that can be stored on Storage Slip #%i...', searchslip);
+    else
+        printf('\30\08Please enter a valid storage slip between %i and %i, inclusive.', MINSLIP, MAXSLIP);
+        return;
+    end
+
+    for k,v in ipairs(STORAGES) do
+        for j = 0, inventory:GetContainerMax(v.id), 1 do
+            local itemEntry = inventory:GetItem(v.id, j);
+            if (itemEntry.Id ~= 0 and itemEntry.Id ~= 65535) then
+                local item = resources:GetItemById(itemEntry.Id);
+                if (item ~= nil) then
+                    --printf('%s: %s', item.Name[config.language], itemEntry.Id)
+                    foundSlip,foundItem = findinslip(searchslip, itemEntry) 
+                    if (foundSlip ~= nil) then
+                        --keyset[#keyset+1] = foundSlip
+                        --printf('%s: %s', foundSlip, foundItem)
+                        --result[foundSlip] = foundItem;
+                        --table.insert(found, foundItem)
+                        if result[foundSlip] == nil then 
+                            result[foundSlip] = {}
+                            table.insert(result[foundSlip], foundItem); 
+                            keyset[#keyset+1] = foundSlip
+                            --result[foundSlip][itemEntry] = {};
+                        else
+                            table.insert(result[foundSlip], foundItem); 
+                            --result[foundSlip].itemEntry = item.Name
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    --table.sort()
+    local keysize = #keyset;
+    local resultsize = 0;
+    if keysize > 0 then
+        table.sort(keyset)
+        for slipIndex=1, keysize, 1 do
+            for _,item in pairs(result[keyset[slipIndex]]) do
+                printf('%s: %s', keyset[slipIndex],item);
+                resultsize = resultsize + 1;
+            end
+        end
+        if searchslip == 0 then
+            printf("\30\08Found %i occurrence(s) of storable items in %i slips.", resultsize, keysize);
+        else
+            printf("\30\08Found %i occurrence(s) of storable items in storage slip #%i.", resultsize, searchslip);
+        end
+    else
+        printf('\30\08No slip-storable items found.');
+    end
+end
+
+-------------------------------------------------------------------------------
+-- func: printdupes
+-- desc: Searches the player's inventory for items that occupy more than one 
+--       inventory slot. (Note, stacks or single items will both count as 1. 
+--       Therefore, 2 stacks of 99 HP-Bayld will have a count of 2.)
+--
+-- args: none
+--
+-------------------------------------------------------------------------------
+local function printdupes()
+    
+    local result = { };
+    local dupes = {};
+    local resultsize = 0;
+    local dupesize = 0;
+
+    printf('\30\08Searching for duplicate items...');      
+    for k,v in ipairs(STORAGES) do
+        for j = 0, inventory:GetContainerMax(v.id), 1 do
+            local itemEntry = inventory:GetItem(v.id, j);
+            if (itemEntry.Id ~= 0 and itemEntry.Id ~= 65535) then
+                local item = resources:GetItemById(itemEntry.Id);
+                if (item ~= nil) then
+                        if result[item.ItemId] == nil then 
+                            result[item.ItemId] = 1;
+                        else
+                            cnt = result[item.ItemId] + 1
+                            result[item.ItemId] = cnt;
+                            if cnt == 2 then
+                                resultsize = resultsize + 1;
+                            end
+                        end
+                        --printf('(itemName)=%s: (itemID):%s, (result[itemID]):%s', item.Name[config.language], item.ItemId, result[item.ItemId]);
+                end
+            end
+        end
+    end
+       
+    dupesize = 0;
+        if (resultsize > 0) then
+            for id,cnt in pairs(result) do
+                if ( tonumber(cnt) > 1 ) then
+                    --printf('I %s: %d', id, cnt);
+                    local dupeitem = resources:GetItemById(id);
+                    dupes[id] = { name = dupeitem.Name[config.language], count=cnt };
+                    dupesize = dupesize + 1;
+                end
+            end
+        end
+
+        if (dupesize > 0) then
+            for k,v in pairs(dupes) do
+                printf('%s: %d', v.name, v.count);
+            end
+            printf("\30\08Found %i occurrence(s) of duplicate items.", dupesize);
+        else
+            printf('\30\08No duplicate items found.');  
+            return true;            
+        end
+        
 end
 
 -------------------------------------------------------------------------------
 ashita.register_event('command', function(cmd, nType)
     local args = getFindArgs(cmd);
-    if (args == nil or #args < 2) then return false; end
+    if (args == nil) then return false; end
     
-    if (args[1]:lower() == '/find') then
+    if (args[1]:lower() == '/find' and #args <= 2) then
         search(args[2]:lower(), false);
         return true;
-    elseif (args[1]:lower() == '/findmore') then
+    elseif (args[1]:lower() == '/findmore' and #args <= 2) then
         search(args[2]:lower(), true);
         return true;
+    elseif (args[1]:lower() == '/finddupes' and #args <= 1) then 
+        printdupes();
+        return true;
+    elseif (args[1]:lower() == '/findslips' and #args <= 2) then 
+        if #args >= 2 then
+            searchslip = tonumber(args[2]:lower());
+            if not searchslip then
+                printf('\30\08Please enter a valid storage slip between %i and %i, inclusive.', MINSLIP, MAXSLIP);
+                return false;
+            else
+                printslips(searchslip);
+                return true;
+            end
+        else
+            printslips(0);
+        end
     end;
-    
     return false;
 end );
