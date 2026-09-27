@@ -44,10 +44,11 @@ Ashita v4 向けの日本語対応版です。スラッシュコマンドで、�
 ![/findslips の例](screenshots/ja/ex3.png)
 
 ```
-/finddupes
+/finddupesj
 ```
 
 2つ以上の枠を使っているアイテムを表示します。スタック1つは1枠です。出力は「アイテム名: 枠数」です。
+コマンドが英語版と違います、ｊを付けないと英語で出力されるので注意です。
 
 ![/finddupes の例 1](screenshots/ja/ex4.png)
 
