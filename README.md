@@ -39,7 +39,7 @@ Ashita v4 向けの日本語対応版です。スラッシュコマンドで、�
 /findslips 1
 ```
 
-収納スリップにしまえる所持品を表示します。番号を付けると、そのスリップだけを見ます。番号は 1 から、このアドオンが対応しているスリップの最後までです。
+モグの預かり帳にしまえる所持品を表示します。番号を付けると、その預かり帳だけを見ます。番号は 1 から、このアドオンが対応しているスリップの最後までです。
 
 ![/findslips の例](screenshots/ja/ex3.png)
 
@@ -49,8 +49,8 @@ Ashita v4 向けの日本語対応版です。スラッシュコマンドで、�
 
 2つ以上の枠を使っているアイテムを表示します。スタック1つは1枠です。出力は「アイテム名: 枠数」です。
 
-![/finddupes の例 1](screenshots/ja/ex4a.png)
-![/finddupes の例 2](screenshots/ja/ex4b.png)
+![/finddupes の例 1](screenshots/ja/ex4.png)
+
 
 日本語の画面写真は `screenshots/ja/` に置きます。ファイル名は上の参照と同じ `ex1.png`、`ex2.png`、`ex3.png`、`ex4a.png`、`ex4b.png` です。
 
