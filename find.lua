@@ -22,9 +22,9 @@
  *  DEALINGS IN THE SOFTWARE.
 ]]--
 
-addon.author   = 'MalRD, zombie343, sippius(v4), Haruuc';
+addon.author   = 'MalRD, zombie343, sippius(v4), Haruuc, Hando';
 addon.name     = 'Find';
-addon.version  = '3.1.0_cexi';
+addon.version  = '3.1.0h';
 
 require('common');
 local slips  = require('slips');
@@ -70,6 +70,9 @@ local default_config =
 local config = default_config;
 local inventory = AshitaCore:GetMemoryManager():GetInventory();
 local resources = AshitaCore:GetResourceManager();
+-- Each container is Items[81] (indexes 0..80). CountMax can be 0, and then
+-- a 0..max loop only reports the first slot.
+local SLOT_LAST = 80;
 local MINSLIP = 1;
 local MAXSLIP = #slips.ids;
 
@@ -84,8 +87,6 @@ end
 
 local CP_UTF8 = 65001;
 local CP_SJIS = 932;
-local NAME_FIELDS = { 'Name', 'LogNameSingular', 'LogNamePlural' };
-
 local function has_high_byte(s)
     return type(s) == 'string' and s:find('[\128-\255]') ~= nil;
 end
@@ -279,6 +280,10 @@ end
 
 -------------------------------------------------------------------------------
 ashita.events.register('load', 'load_cb', function()
+    -- print() during load is easy to miss; show the line on the next frame.
+    ashita.tasks.once(0, function()
+        printf('\30\08find を読み込みました。 (%s)', addon.version);
+    end);
 end );
 
 -------------------------------------------------------------------------------
@@ -301,27 +306,59 @@ end;
 --       useDescription     -> true if the item description should be searched.
 -- returns: true if a match is found, otherwise false.
 -------------------------------------------------------------------------------
-local function field_contains(raw, needle)
-    if raw == nil or needle == nil or needle == '' then return false; end
-    return normalize_text(raw, true):find(needle, 1, true) ~= nil;
+-- Resource strings are C buffers. Keep a short copy that stops at NUL so a
+-- long log/description buffer cannot be used as a table key or chat line.
+local MAX_LABEL = 96;
+
+local function clean_label(raw)
+    if type(raw) ~= 'string' or raw == '' then return nil; end
+    local n = math.min(#raw, MAX_LABEL);
+    local out = {};
+    for i = 1, n do
+        local b = raw:byte(i);
+        if b == 0 then break; end
+        if b < 0x20 then return nil; end
+        out[#out + 1] = string.char(b);
+    end
+    if #out == 0 then return nil; end
+    return table.concat(out);
+end
+
+local function label_matches(raw, needle)
+    local label = clean_label(raw);
+    if label == nil or needle == nil or needle == '' then return nil; end
+    if normalize_text(label, true):find(needle, 1, true) == nil then return nil; end
+    return label;
 end
 
 local function find(item, cleanString, useDescription)
-    if (item == nil) then return false end;
-    if (cleanString == nil or cleanString == '') then return false end;
+    if (item == nil) then return false; end
+    if (cleanString == nil or cleanString == '') then return false; end
 
-    for i = 0, 3 do
-        for _, field in ipairs(NAME_FIELDS) do
-            if field_contains(field_at(item[field], i), cleanString) then
-                return true;
-            end
-        end
-        if useDescription and field_contains(field_at(item.Description, i), cleanString) then
-            return true;
+    local matched = false;
+    local function hits(raw)
+        if label_matches(raw, cleanString) ~= nil then
+            matched = true;
         end
     end
 
-    return false;
+    for i = 0, 3 do
+        hits(field_at(item.Name, i));
+        hits(field_at(item.LogNameSingular, i));
+        hits(field_at(item.LogNamePlural, i));
+        if useDescription then
+            hits(field_at(item.Description, i));
+        end
+    end
+
+    if not matched then
+        return false;
+    end
+
+    -- LogNamePlural is longer ("robes") and still contains the query ("robe").
+    -- Show the item name, not that log line.
+    local preferJapanese = has_high_byte(cleanString);
+    return true, clean_label(display_name(item, preferJapanese)) or '';
 end
 
 -------------------------------------------------------------------------------
@@ -347,36 +384,56 @@ local function search(searchString, useDescription)
     local result = { };
     local storageSlips = { };
 
+    local slipNeedle = normalize_text('storage slip ', false);
+
     for k,v in ipairs(STORAGES) do
-        local foundCount = 1;
-        for j = 0, inventory:GetContainerCountMax(v.id), 1 do
-            local itemEntry = inventory:GetContainerItem(v.id, j);
-            if (itemEntry.Id ~= 0 and itemEntry.Id ~= 65535) then
-                local item = resources:GetItemById(itemEntry.Id);
+        for j = 0, SLOT_LAST do
+            local okEntry, itemEntry = pcall(function()
+                return inventory:GetContainerItem(v.id, j);
+            end);
+            if okEntry and itemEntry ~= nil then
+                local itemId = tonumber(itemEntry.Id) or 0;
+                if (itemId ~= 0 and itemId ~= 65535) then
+                    local item = resources:GetItemById(itemId);
 
-                if (item ~= nil) then
-                    if (find(item, folded, useDescription)) then
-                        quantity = 1;
-                        if (itemEntry.Count ~= nil and item.StackSize > 1) then
-                            quantity = itemEntry.Count;
+                    if (item ~= nil) then
+                        local matched, matchedName = find(item, folded, useDescription);
+                        if (matched) then
+                            local quantity = 1;
+                            local stack = tonumber(item.StackSize) or 1;
+                            local count = tonumber(itemEntry.Count);
+                            if (count ~= nil and stack > 1) then
+                                quantity = count;
+                            end
+
+                            if result[k] == nil then
+                                result[k] = { };
+                                found[k] = { };
+                            end
+
+                            -- Same item id stacks onto one line. Different ids stay separate
+                            -- even when the Japanese labels would not make unique table keys.
+                            local name = matchedName;
+                            if name == nil or name == '' then
+                                name = clean_label(display_name(item, preferJapanese)) or '';
+                            end
+                            local row = found[k][itemId];
+                            if row == nil then
+                                row = { name = name, count = 0 };
+                                found[k][itemId] = row;
+                                result[k][#result[k] + 1] = row;
+                            end
+
+                            row.count = row.count + quantity;
                         end
 
-                        if result[k] == nil then
-                            result[k] = { };
-                            found[k] = { };
+                        if find(item, slipNeedle, false) then
+                            local extra = itemEntry.Extra;
+                            if type(extra) == 'string' then
+                                extra = extra:sub(1);
+                            end
+                            storageSlips[#storageSlips + 1] = { id = itemId, extra = extra };
                         end
-
-                        if found[k][itemEntry.Id] == nil then
-                            found[k][itemEntry.Id] = foundCount;
-                            result[k][foundCount] = { name = display_name(item, preferJapanese), count = 0 };
-                            foundCount = foundCount + 1;
-                        end
-
-                        result[k][found[k][itemEntry.Id]].count = result[k][found[k][itemEntry.Id]].count + quantity;
-                    end
-
-                    if find(item, normalize_text('storage slip ', false), false) then
-                        storageSlips[#storageSlips + 1] = {item, itemEntry};
                     end
                 end
             end
@@ -387,32 +444,34 @@ local function search(searchString, useDescription)
     for k,v in ipairs(STORAGES) do
         if result[k] ~= nil then
             storageID, storageName = getStorage(k);
-            for _,item in ipairs(result[k]) do
-                quantity = '';
+            for i = 1, #result[k] do
+                local item = result[k][i];
+                local line = storageName .. ': ' .. item.name;
                 if item.count > 1 then
-                    quantity = string.format('[%d]', item.count)
+                    line = line .. string.format(' [%d]', item.count);
                 end
-                printf('%s: %s %s', storageName, item.name, quantity);
+                print(line);
                 total = total + item.count;
             end
         end
     end
 
     for k,v in ipairs(storageSlips) do
-        local slip = resources:GetItemById(v[1].Id);
-        local slipItems = slips.items[v[1].Id];
-        local extra = v[2].Extra;
+        local slip = resources:GetItemById(v.id);
+        local slipItems = slips.items[v.id];
+        local extra = v.extra;
 
         for i,slipItemID in ipairs(slipItems) do
             local slipItem = resources:GetItemById(slipItemID);
-            if (find(slipItem, folded, useDescription)) then
+            local matched, matchedName = find(slipItem, folded, useDescription);
+            if (matched) then
                 local byte = struct.unpack('B',extra,math.floor((i - 1) / 8)+1);
                 if byte < 0 then
                     byte = byte + 256;
                 end
 
                 if (hasBit(byte, bit((i - 1) % 8 + 1))) then
-                    printf('%s: %s', display_name(slip, preferJapanese), display_name(slipItem, preferJapanese));
+                    printf('%s: %s', display_name(slip, preferJapanese), matchedName or display_name(slipItem, preferJapanese));
                     total = total + 1;
                 end
             end
@@ -423,12 +482,13 @@ local function search(searchString, useDescription)
         if vault[v.id] ~= nil then
             for itemID, qty in pairs(vault[v.id]) do
                 local vaultItem = resources:GetItemById(itemID)
-                if (find(vaultItem, folded, useDescription)) then
+                local matched, matchedName = find(vaultItem, folded, useDescription);
+                if (matched) then
                     quantity = '';
                     if qty > 1 then
                         quantity = string.format('[%d]', qty)
                     end
-                    printf('%s: %s %s', v.name, display_name(vaultItem, preferJapanese), quantity);
+                    printf('%s: %s %s', v.name, matchedName or display_name(vaultItem, preferJapanese), quantity);
                     total = total + qty;
                 end
             end
@@ -531,10 +591,13 @@ local function printslips(searchslip)
     end
 
     for k,v in ipairs(STORAGES) do
-        for j = 0, inventory:GetContainerCountMax(v.id), 1 do
-            local itemEntry = inventory:GetContainerItem(v.id, j);
-            if (itemEntry.Id ~= 0 and itemEntry.Id ~= 65535) then
-                local item = resources:GetItemById(itemEntry.Id);
+        for j = 0, SLOT_LAST do
+            local okEntry, itemEntry = pcall(function()
+                return inventory:GetContainerItem(v.id, j);
+            end);
+            local itemId = okEntry and itemEntry ~= nil and tonumber(itemEntry.Id) or 0;
+            if (itemId ~= 0 and itemId ~= 65535) then
+                local item = resources:GetItemById(itemId);
                 if (item ~= nil) then
                     --printf('%s: %s', item.Name[config.language], itemEntry.Id)
                     foundSlip,foundItem = findinslip(searchslip, itemEntry)
@@ -597,16 +660,19 @@ local function printdupes()
 
     printf('\30\08重複しているアイテムを探しています...');
     for k,v in ipairs(STORAGES) do
-        for j = 0, inventory:GetContainerCountMax(v.id), 1 do
-            local itemEntry = inventory:GetContainerItem(v.id, j);
-            if (itemEntry.Id ~= 0 and itemEntry.Id ~= 65535) then
-                local item = resources:GetItemById(itemEntry.Id);
+        for j = 0, SLOT_LAST do
+            local okEntry, itemEntry = pcall(function()
+                return inventory:GetContainerItem(v.id, j);
+            end);
+            local itemId = okEntry and itemEntry ~= nil and tonumber(itemEntry.Id) or 0;
+            if (itemId ~= 0 and itemId ~= 65535) then
+                local item = resources:GetItemById(itemId);
                 if (item ~= nil) then
-                    if result[item.Id] == nil then
-                        result[item.Id] = 1;
+                    if result[itemId] == nil then
+                        result[itemId] = 1;
                     else
-                        cnt = result[item.Id] + 1
-                        result[item.Id] = cnt;
+                        cnt = result[itemId] + 1
+                        result[itemId] = cnt;
                         if cnt == 2 then
                             resultsize = resultsize + 1;
                         end
