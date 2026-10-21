@@ -24,7 +24,7 @@
 
 addon.author   = 'MalRD, zombie343, sippius(v4), Haruuc, Hando';
 addon.name     = 'Find';
-addon.version  = '3.1.0h';
+addon.version  = '3.2.0';
 
 require('common');
 local slips  = require('slips');
@@ -324,8 +324,27 @@ local function clean_label(raw)
     return table.concat(out);
 end
 
+-- Descriptions contain newlines and colour bytes below 0x20. Skip those
+-- instead of rejecting the whole string, and keep more than a short name.
+local MAX_SEARCH = 2048;
+
+local function searchable_text(raw)
+    if type(raw) ~= 'string' or raw == '' then return nil; end
+    local n = math.min(#raw, MAX_SEARCH);
+    local out = {};
+    for i = 1, n do
+        local b = raw:byte(i);
+        if b == 0 then break; end
+        if b >= 0x20 and b ~= 0x7F then
+            out[#out + 1] = string.char(b);
+        end
+    end
+    if #out == 0 then return nil; end
+    return table.concat(out);
+end
+
 local function label_matches(raw, needle)
-    local label = clean_label(raw);
+    local label = searchable_text(raw);
     if label == nil or needle == nil or needle == '' then return nil; end
     if normalize_text(label, true):find(needle, 1, true) == nil then return nil; end
     return label;
@@ -470,7 +489,7 @@ local function search(searchString, useDescription)
                     byte = byte + 256;
                 end
 
-                if (hasBit(byte, bit((i - 1) % 8 + 1))) then
+                if (hasBit(byte, slipBit((i - 1) % 8 + 1))) then
                     printf('%s: %s', display_name(slip, preferJapanese), matchedName or display_name(slipItem, preferJapanese));
                     total = total + 1;
                 end
@@ -499,7 +518,8 @@ local function search(searchString, useDescription)
 end
 
 -------------------------------------------------------------------------------
-function bit(p)
+-- Named slipBit so this does not replace Lua's bit library (bit.band).
+function slipBit(p)
     return 2 ^ (p - 1);
  end
 
@@ -520,7 +540,7 @@ local function findinslip(searchslip, item)
                 if item.Id == v[x] then
                     local slipItem = resources:GetItemById(item.Id);
                     --printf('%s: %s', slip.Name[config.language], slipItem.Name[config.language]);
-                    return display_name(slip, false), display_name(slipItem, false);
+                    return display_name(slip, true), display_name(slipItem, true);
                 end
             end
         end
@@ -530,11 +550,11 @@ local function findinslip(searchslip, item)
             if item.Id == slips.items[slips.ids[searchslip]][x] then
                 local slipItem = resources:GetItemById(item.Id);
                 --printf('%s: %s', slip.Name[config.language], slipItem.Name[config.language]);
-                return display_name(slip, false), display_name(slipItem, false);
+                return display_name(slip, true), display_name(slipItem, true);
             end
         end
     else
-        printf('\30\08収納スリップは%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
+        printf('\30\08モグの預かり帳は%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
     end
     return nil,nil;
 end
@@ -545,7 +565,7 @@ local function getFindArgs(cmd)
     if (not cmd:find('/find', 1, true)) then return nil; end
 
     local indexOf = cmd:find(' ', 1, true);
-    if (cmd:find('/findslips', 1, true) or cmd:find('/finddupes', 1, true)) and indexOf == nil then
+    if (cmd:find('/findslips', 1, true) or cmd:find('/finddupes', 1, true) or cmd:find('/findcol', 1, true)) and indexOf == nil then
         cmdTable =     {
             [1] = cmd
         };
@@ -582,11 +602,11 @@ local function printslips(searchslip)
     local keyset = {};
 
     if searchslip == 0 then
-        printf('\30\08収納スリップにしまえるアイテムを探しています...');
+        printf('\30\08モグの預かり帳にしまえるアイテムを探しています...');
     elseif searchslip >= MINSLIP and searchslip <= MAXSLIP then
-        printf('\30\08収納スリップ#%iにしまえるアイテムを探しています...', searchslip);
+        printf('\30\08モグの預かり帳【%i】にしまえるアイテムを探しています...', searchslip);
     else
-        printf('\30\08収納スリップは%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
+        printf('\30\08モグの預かり帳は%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
         return;
     end
 
@@ -633,12 +653,12 @@ local function printslips(searchslip)
             end
         end
         if searchslip == 0 then
-            printf('\30\08しまえるアイテムが%i個、%i種類のスリップに見つかりました。', resultsize, keysize);
+            printf('\30\08しまえるアイテムが%i個、%i種類のモグの預かり帳に見つかりました。', resultsize, keysize);
         else
-            printf('\30\08収納スリップ#%iにしまえるアイテムが%i個見つかりました。', searchslip, resultsize);
+            printf('\30\08モグの預かり帳【%i】にしまえるアイテムが%i個見つかりました。', searchslip, resultsize);
         end
     else
-        printf('\30\08収納スリップにしまえるアイテムは見つかりませんでした。');
+        printf('\30\08モグの預かり帳にしまえるアイテムは見つかりませんでした。');
     end
 end
 
@@ -651,7 +671,7 @@ end
 -- args: none
 --
 -------------------------------------------------------------------------------
-local function printdupes()
+local function printdupes(preferJapanese)
 
     local result = { };
     local dupes = {};
@@ -708,7 +728,7 @@ local function printdupes()
                 if ( tonumber(cnt) > 1 ) then
                     --printf('I %s: %d', id, cnt);
                     local dupeitem = resources:GetItemById(id);
-                    dupes[id] = { name = display_name(dupeitem, false), count=cnt };
+                    dupes[id] = { name = display_name(dupeitem, preferJapanese), count=cnt };
                     dupesize = dupesize + 1;
                 end
             end
@@ -726,8 +746,51 @@ local function printdupes()
 
 end
 
+local seenMogHouse = false;
+local packetSync = 0;
+
+local function mog_state_file()
+    local dir = AshitaCore:GetInstallPath() .. 'config\\addons\\find\\';
+    return dir .. 'mog_house.dat', dir;
+end
+
+local function set_seen_mog_house(value)
+    seenMogHouse = value == true;
+    local path, dir = mog_state_file();
+    pcall(function()
+        ashita.fs.create_dir(dir);
+        local f = io.open(path, 'w');
+        if f then
+            f:write(seenMogHouse and '1' or '0');
+            f:close();
+        end
+    end);
+end
+
+local function load_seen_mog_house()
+    local path = mog_state_file();
+    local f = io.open(path, 'r');
+    if not f then
+        seenMogHouse = false;
+        return;
+    end
+    local v = f:read('*a');
+    f:close();
+    seenMogHouse = (v == '1');
+end
+load_seen_mog_house();
+
 ashita.events.register('packet_in', 'find_pkt', function(e)
-    if e.id == 0x1A1 then
+    -- Zone enter: byte 0x80 is 1 inside a mog house or rent-a-room.
+    if e.id == 0x000A then
+        local data = e.data_modified or e.data;
+        local ok, flag = pcall(struct.unpack, 'B', data, 0x80 + 1);
+        if ok then set_seen_mog_house(flag == 1); end
+    elseif e.id == 0x096 then
+        set_seen_mog_house(true);
+    elseif e.id == 0x097 then
+        set_seen_mog_house(false);
+    elseif e.id == 0x1A1 then
         local itemID     = struct.unpack('H', e.data, 5)  -- uint16 @ 0x04
         local quantity   = struct.unpack('H', e.data, 7)  -- uint16 @ 0x06
         local locationID = struct.unpack('B', e.data, 9)  -- uint8  @ 0x08
@@ -751,25 +814,423 @@ ashita.events.register('packet_in', 'find_pkt', function(e)
     end
 end)
 
+-- The client stamps every outgoing packet with an incrementing sync.
+-- A move sent with sync 0 is ignored.
+ashita.events.register('packet_out', 'find_sync', function(e)
+    if e.injected == true then return; end
+    local data = e.data_modified or e.data;
+    local ok, sync = pcall(struct.unpack, 'H', data, 0x02 + 1);
+    if ok and type(sync) == 'number' then
+        packetSync = sync % 65536;
+    end
+end)
+
+local collectBusy = false;
+local TEMP_CONTAINER = 3;
+
+-- Residential Area zone ids only. City ids such as 238 / 243 stay the same
+-- inside a house on this client, so they must not be treated as a house.
+-- Safe/locker size is also visible in the field here, so it is not used.
+local MOG_HOUSE_ZONES = { [189] = true, [199] = true, [214] = true, [219] = true };
+
+local function zone_is_house(zone)
+    zone = tonumber(zone) or 0;
+    if MOG_HOUSE_ZONES[zone] then return true; end
+    local rm = AshitaCore:GetResourceManager();
+    local names = {};
+    local function add(name)
+        if type(name) == 'string' and name ~= '' then
+            names[#names + 1] = name;
+        end
+    end
+    local ok, name = pcall(function()
+        return rm:GetString('zones.names', zone);
+    end);
+    if ok then add(name); end
+    for lang = 0, 3 do
+        local got, value = pcall(function()
+            return rm:GetString('zones.names', zone, lang);
+        end);
+        if got then add(value); end
+    end
+    for _, raw in ipairs(names) do
+        local text = normalize_text(raw, true);
+        if text:find('モグハウス', 1, true)
+            or text:find('住居区域', 1, true)
+            or text:find('レンタルハウス', 1, true)
+            or text:find('レンタルルーム', 1, true)
+            or text:find('residential area', 1, true)
+            or text:find('rent-a-room', 1, true)
+            or text:find('mog house', 1, true)
+            or raw:find(for_chat('モグハウス'), 1, true)
+            or raw:find(for_chat('住居区域'), 1, true)
+            or raw:find(for_chat('レンタルハウス'), 1, true)
+            or raw:find(for_chat('レンタルルーム'), 1, true) then
+            return true;
+        end
+    end
+    return false;
+end
+
+local function in_mog_house()
+    if seenMogHouse then return true; end
+    local party = AshitaCore:GetMemoryManager():GetParty();
+    if zone_is_house(party:GetMemberZone(0)) then return true; end
+    local ok, zone2 = pcall(function()
+        return party:GetMemberZone2(0);
+    end);
+    if ok and zone_is_house(zone2) then return true; end
+    local index = party:GetMemberTargetIndex(0);
+    local entity = AshitaCore:GetMemoryManager():GetEntity();
+    if index == nil or entity == nil then return false; end
+    local got, zid = pcall(function()
+        return entity:GetZoneId(index);
+    end);
+    return got and zone_is_house(zid);
+end
+
+local function trim_text(s)
+    if type(s) ~= 'string' then return ''; end
+    return (s:gsub('^%s+', ''):gsub('%s+$', ''));
+end
+
+local function split_collect(rest)
+    rest = trim_text(rest);
+    if rest == '' then return nil, nil; end
+    local pos;
+    local i = 1;
+    while true do
+        local found = rest:find(' ', i, true);
+        if not found then break; end
+        pos = found;
+        i = found + 1;
+    end
+    if not pos then return nil, nil; end
+    local item = trim_text(rest:sub(1, pos - 1));
+    local storage = trim_text(rest:sub(pos + 1));
+    if item == '' or storage == '' then return nil, nil; end
+    return item, storage;
+end
+
+local function find_storage(name)
+    local want = normalize_text(name, false);
+    if want == '' then return nil; end
+    for _, entry in ipairs(STORAGES) do
+        if normalize_text(entry.name, true) == want then
+            return entry;
+        end
+    end
+    return nil;
+end
+
+local function container_limit(containerId)
+    local max = tonumber(inventory:GetContainerCountMax(containerId)) or 0;
+    if max < 1 then return 0; end
+    if max > SLOT_LAST then return SLOT_LAST; end
+    return max;
+end
+
+local function read_slot(containerId, index)
+    local ok, itemEntry = pcall(function()
+        return inventory:GetContainerItem(containerId, index);
+    end);
+    if not ok or itemEntry == nil then return nil; end
+    local itemId = tonumber(itemEntry.Id) or 0;
+    if itemId == 0 or itemId == 65535 then return nil; end
+    local packetIndex = tonumber(itemEntry.Index);
+    if packetIndex == nil or packetIndex <= 0 then
+        packetIndex = index;
+    end
+    return {
+        id = itemId,
+        count = tonumber(itemEntry.Count) or 1,
+        flags = tonumber(itemEntry.Flags) or 0,
+        index = packetIndex,
+    };
+end
+
+-- Server-chosen first empty slot. Indexes below this are stack-only.
+local EMPTY_DEST = 0x52;
+
+local function byte_of(n)
+    n = math.floor(tonumber(n) or 0);
+    if n < 0 then n = 0; end
+    return n % 256;
+end
+
+-- One 0x029, same layout as XIUI satchel. Never invent a larger count.
+local function send_move(fromContainer, fromSlot, toContainer, toSlot, count)
+    fromContainer = math.floor(tonumber(fromContainer) or -1);
+    fromSlot = math.floor(tonumber(fromSlot) or -1);
+    toContainer = math.floor(tonumber(toContainer) or -1);
+    toSlot = math.floor(tonumber(toSlot) or -1);
+    count = math.floor(tonumber(count) or 0);
+    if count < 1 then return false; end
+    if fromContainer < 0 or fromContainer > 16 or fromContainer == TEMP_CONTAINER then return false; end
+    if toContainer < 0 or toContainer > 16 or toContainer == TEMP_CONTAINER then return false; end
+    if fromSlot < 1 or fromSlot >= EMPTY_DEST then return false; end
+    if toSlot ~= EMPTY_DEST and (toSlot < 1 or toSlot >= EMPTY_DEST) then return false; end
+    if fromContainer == toContainer and fromSlot == toSlot then return false; end
+
+    packetSync = (packetSync + 1) % 65536;
+    local packet = {
+        0x29,
+        0x06,
+        byte_of(packetSync),
+        byte_of(math.floor(packetSync / 256)),
+        byte_of(count),
+        byte_of(math.floor(count / 256)),
+        byte_of(math.floor(count / 65536)),
+        byte_of(math.floor(count / 16777216)),
+        byte_of(fromContainer),
+        byte_of(toContainer),
+        byte_of(fromSlot),
+        byte_of(toSlot),
+    };
+    AshitaCore:GetPacketManager():AddOutgoingPacket(0x029, packet);
+    return true;
+end
+
+local function count_owned(itemId)
+    local total = 0;
+    for _, entry in ipairs(STORAGES) do
+        if entry.id ~= TEMP_CONTAINER then
+            local max = container_limit(entry.id);
+            if max >= 1 then
+                for j = 1, max do
+                    local slot = read_slot(entry.id, j);
+                    if slot and slot.id == itemId then
+                        total = total + slot.count;
+                    end
+                end
+            end
+        end
+    end
+    return total;
+end
+
+local function collect_scan(destId, folded)
+    local sources = {};
+    local anywhere = false;
+    for _, entry in ipairs(STORAGES) do
+        if entry.id ~= TEMP_CONTAINER then
+            local max = container_limit(entry.id);
+            if max >= 1 then
+                for j = 1, max do
+                    local slot = read_slot(entry.id, j);
+                    if slot and slot.flags == 0 and slot.count >= 1 then
+                        local item = resources:GetItemById(slot.id);
+                        if item and find(item, folded, false) then
+                            anywhere = true;
+                            if entry.id ~= destId then
+                                local stack = tonumber(item.StackSize) or 1;
+                                if stack < 1 then stack = 1; end
+                                local packetIndex = slot.index;
+                                if packetIndex < 1 or packetIndex >= EMPTY_DEST then
+                                    packetIndex = j;
+                                end
+                                sources[#sources + 1] = {
+                                    container = entry.id,
+                                    index = j,
+                                    packetIndex = packetIndex,
+                                    id = slot.id,
+                                    count = slot.count,
+                                    stack = stack,
+                                };
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return sources, anywhere;
+end
+
+-- Prefer filling a partial stack. Empty dest uses 0x52, not a guessed slot.
+local function dest_room(destId, itemId, stack)
+    local max = container_limit(destId);
+    local partial;
+    local hasEmpty = false;
+    for j = 1, max do
+        local slot = read_slot(destId, j);
+        if slot == nil then
+            hasEmpty = true;
+        elseif slot.id == itemId and slot.flags == 0 and slot.count < stack then
+            local room = stack - slot.count;
+            local destIndex = slot.index;
+            if destIndex >= 1 and destIndex < EMPTY_DEST then
+                if partial == nil or room > partial.room then
+                    partial = { index = destIndex, room = room };
+                end
+            end
+        end
+    end
+    return partial, hasEmpty;
+end
+
+local function collect_items(itemQuery)
+    if collectBusy then
+        printf('\30\08いま集めている最中です。');
+        return;
+    end
+
+    local itemName, storageName = split_collect(itemQuery);
+    if not itemName or not storageName then
+        printf('\30\08/findcol アイテム名 収納名');
+        return;
+    end
+
+    local cleanString = AshitaCore:GetChatManager():ParseAutoTranslate(itemName, false);
+    if cleanString == nil or cleanString == '' then
+        printf('\30\08/findcol アイテム名 収納名');
+        return;
+    end
+    local folded = normalize_text(cleanString, false);
+    local shownItem = for_chat(cleanString);
+
+    local dest = find_storage(storageName);
+    if dest == nil then
+        printf('\30\08%sという収納はありません', for_chat(storageName));
+        return;
+    end
+    if dest.id == TEMP_CONTAINER then
+        printf('\30\08テンポラリには集められません。');
+        return;
+    end
+
+    if not in_mog_house() then
+        local zone = tonumber(AshitaCore:GetMemoryManager():GetParty():GetMemberZone(0)) or 0;
+        printf('\30\08モグハウスで使ってください。（ゾーン %d）', zone);
+        return;
+    end
+
+    inventory = AshitaCore:GetMemoryManager():GetInventory();
+    local sources, anywhere = collect_scan(dest.id, folded);
+    if not anywhere then
+        printf('\30\08%sはどのストレージにもありません', shownItem);
+        return;
+    end
+    if #sources == 0 then
+        printf('\30\08%sはすでに%sにあります', shownItem, dest.name);
+        return;
+    end
+
+    local function has_room(list)
+        for _, src in ipairs(list) do
+            local partial, empty = dest_room(dest.id, src.id, src.stack);
+            if partial or empty then return true; end
+        end
+        return false;
+    end
+    if not has_room(sources) then
+        printf('\30\08%sに空きがありません', dest.name);
+        return;
+    end
+
+    collectBusy = true;
+    local waiting;
+    local function step()
+        if not collectBusy then return; end
+        inventory = AshitaCore:GetMemoryManager():GetInventory();
+
+        if waiting then
+            local nowOwned = count_owned(waiting.id);
+            if nowOwned > waiting.owned then
+                collectBusy = false;
+                printf('\30\08個数が増えました。処理を止めました。');
+                return;
+            end
+            local slot = read_slot(waiting.container, waiting.index);
+            local stillThere = slot and slot.id == waiting.id and slot.count >= waiting.count;
+            if stillThere then
+                waiting.tries = waiting.tries + 1;
+                if waiting.tries >= 4 then
+                    collectBusy = false;
+                    printf('\30\08移動できませんでした。');
+                    return;
+                end
+                ashita.tasks.once(1.0, step);
+                return;
+            end
+            waiting = nil;
+        end
+
+        local pending = collect_scan(dest.id, folded);
+        if #pending == 0 then
+            collectBusy = false;
+            printf('\30\08%sを%sに集めました。', shownItem, dest.name);
+            return;
+        end
+
+        for _, src in ipairs(pending) do
+            local live = read_slot(src.container, src.index);
+            if live and live.id == src.id and live.flags == 0 and live.count >= 1 then
+                local stack = src.stack;
+                if stack < 1 then stack = 1; end
+                local moveCount = live.count;
+                if moveCount > stack then moveCount = stack; end
+                local fromIndex = live.index;
+                if fromIndex < 1 or fromIndex >= EMPTY_DEST then
+                    fromIndex = src.index;
+                end
+                local partial, empty = dest_room(dest.id, live.id, stack);
+                local toIndex;
+                if partial then
+                    toIndex = partial.index;
+                    if moveCount > partial.room then moveCount = partial.room; end
+                elseif empty then
+                    toIndex = EMPTY_DEST;
+                end
+                if toIndex and moveCount >= 1 then
+                    local owned = count_owned(live.id);
+                    if send_move(src.container, fromIndex, dest.id, toIndex, moveCount) then
+                        waiting = {
+                            container = src.container,
+                            index = src.index,
+                            id = live.id,
+                            count = live.count,
+                            owned = owned,
+                            tries = 0,
+                        };
+                        ashita.tasks.once(1.0, step);
+                        return;
+                    end
+                end
+            end
+        end
+
+        collectBusy = false;
+        printf('\30\08%sに空きがありません', dest.name);
+    end
+    step();
+end
+
 -------------------------------------------------------------------------------
 ashita.events.register('command', 'command_cb', function(e)
     local args = getFindArgs(e.command);
     if (args == nil) then return false; end
 
-    if (args[1]:lower() == '/find' and #args <= 2) then
+    if (args[1]:lower() == '/findcol') then
+        collect_items(args[2]);
+        return true;
+    elseif (args[1]:lower() == '/find' and #args <= 2) then
         search(args[2], false);
         return true;
     elseif (args[1]:lower() == '/findmore' and #args <= 2) then
         search(args[2], true);
         return true;
+    elseif (args[1]:lower() == '/finddupesj' and #args <= 1) then
+        printdupes(true);
+        return true;
     elseif (args[1]:lower() == '/finddupes' and #args <= 1) then
-        printdupes();
+        printdupes(false);
         return true;
     elseif (args[1]:lower() == '/findslips' and #args <= 2) then
         if #args >= 2 then
             searchslip = tonumber(args[2]:lower());
             if not searchslip then
-                printf('\30\08収納スリップは%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
+                printf('\30\08モグの預かり帳は%iから%iの間で指定してください。', MINSLIP, MAXSLIP);
                 return false;
             else
                 printslips(searchslip);
