@@ -24,7 +24,7 @@
 
 addon.author   = 'MalRD, zombie343, sippius(v4), Haruuc, Hando';
 addon.name     = 'Find';
-addon.version  = '3.2.0';
+addon.version  = '3.1.0i';
 
 require('common');
 local slips  = require('slips');
